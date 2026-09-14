@@ -198,6 +198,7 @@ def monitor_teequest(page, course: dict, dates: list[date], cfg: dict) -> ScanRe
                 cfg["start_time"],
                 cfg["end_time"],
                 int(cfg["players"]),
+                diagnostic_dir=(BASE / "debug" / "teequest") if cfg.get("diagnostic_mode", False) else None,
             )
             for s in found:
                 slots.append(Slot(course["name"], s.tee_date, s.tee_time, s.players, s.url))

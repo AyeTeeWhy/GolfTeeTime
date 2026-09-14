@@ -44,3 +44,8 @@ The included GitHub Action runs every 5 minutes. GitHub Actions does not provide
 ## Important
 
 The first version uses Playwright so the checker can work with JavaScript-heavy booking pages. WebTrac and TeeQuest are enabled first. The remaining platforms are deliberately disabled until their public tee-time interfaces are mapped and tested.
+
+
+### Diagnostic mode
+
+The current build has `diagnostic_mode: true` for Weissinger Hills. Each checked date saves a JSON report, rendered HTML, text dump, and screenshot under `debug/teequest/`. This is intentional for the first live TeeQuest validation. Once the adapter is confirmed, set `diagnostic_mode` back to `false` to stop generating those files.
