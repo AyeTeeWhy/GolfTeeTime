@@ -49,3 +49,12 @@ The first version uses Playwright so the checker can work with JavaScript-heavy 
 ### Diagnostic mode
 
 The current build has `diagnostic_mode: true` for Weissinger Hills. Each checked date saves a JSON report, rendered HTML, text dump, and screenshot under `debug/teequest/`. This is intentional for the first live TeeQuest validation. Once the adapter is confirmed, set `diagnostic_mode` back to `false` to stop generating those files.
+
+
+## Current TeeQuest parser test
+
+The current build is validating Weissinger Hills first. TeeQuest is queried for
+4 players and 18 holes; only visible Book links whose tee-time card supports the
+requested group are accepted, and only 7:00 AM through 9:00 AM ET is considered.
+Diagnostic artifacts remain enabled during validation so parser behavior can be
+reviewed from GitHub Actions before we add notifications and additional platforms.
