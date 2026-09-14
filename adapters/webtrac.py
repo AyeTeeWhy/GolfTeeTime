@@ -66,10 +66,10 @@ def _reveal(frame: Frame, course_name: str) -> bool:
                 loc.first.scroll_into_view_if_needed(timeout=5000)
                 loc.first.click(force=True, timeout=10000)
                 frame.wait_for_timeout(1000)
-                print(f"WEBTRAC V14 REVEAL CLICKED {course_name} frame={frame.url}")
+                print(f"WEBTRAC V15 REVEAL CLICKED {course_name} frame={frame.url}")
                 return True
         except Exception as exc:
-            print(f"WEBTRAC V14 REVEAL ATTEMPT FAILED {course_name} frame={frame.url}: {exc}")
+            print(f"WEBTRAC V15 REVEAL ATTEMPT FAILED {course_name} frame={frame.url}: {exc}")
     return False
 
 def _inventory(frame: Frame, course_name: str) -> tuple[int, int, int]:
@@ -87,7 +87,7 @@ def _inventory(frame: Frame, course_name: str) -> tuple[int, int, int]:
     except Exception:
         pass
     if selects or inputs or buttons:
-        print(f"WEBTRAC V14 INVENTORY frame={frame.url} selects={selects} inputs={inputs} buttons={buttons}")
+        print(f"WEBTRAC V15 INVENTORY frame={frame.url} selects={selects} inputs={inputs} buttons={buttons}")
         for i in range(min(selects, 20)):
             try:
                 s = frame.locator("select").nth(i)
@@ -140,7 +140,7 @@ def _set_date(frame: Frame, tee_date: date, course_name: str) -> bool:
         inp.scroll_into_view_if_needed()
         inp.fill(target)
         inp.press("Tab")
-        print(f"WEBTRAC V14 DATE SET {course_name}: {target} frame={frame.url}")
+        print(f"WEBTRAC V15 DATE SET {course_name}: {target} frame={frame.url}")
         return True
     except Exception:
         try:
@@ -153,10 +153,10 @@ def _set_date(frame: Frame, tee_date: date, course_name: str) -> bool:
                 }""",
                 target,
             )
-            print(f"WEBTRAC V14 DATE JS SET {course_name}: {target} frame={frame.url}")
+            print(f"WEBTRAC V15 DATE JS SET {course_name}: {target} frame={frame.url}")
             return True
         except Exception as exc:
-            print(f"WEBTRAC V14 DATE SET FAILED {course_name}: {exc}")
+            print(f"WEBTRAC V15 DATE SET FAILED {course_name}: {exc}")
             return False
 
 def _click_search(frame: Frame, course_name: str) -> bool:
@@ -176,10 +176,10 @@ def _click_search(frame: Frame, course_name: str) -> bool:
             except PlaywrightTimeoutError:
                 pass
             frame.wait_for_timeout(1500)
-            print(f"WEBTRAC V14 SEARCH CLICKED {course_name} frame={frame.url}")
+            print(f"WEBTRAC V15 SEARCH CLICKED {course_name} frame={frame.url}")
             return True
         except Exception as exc:
-            print(f"WEBTRAC V14 SEARCH CLICK FAILED {course_name}: {exc}")
+            print(f"WEBTRAC V15 SEARCH CLICK FAILED {course_name}: {exc}")
     return False
 
 def _write_diag(page: Page, course_name: str, tee_date: date, diagnostic_dir: Path | None) -> None:
@@ -251,61 +251,138 @@ def _parse_results(frame: Frame, course: dict, tee_date: date, start: time, end:
         if key in seen:
             continue
         seen.add(key)
-        print(f"WEBTRAC V14 MATCH {course.get('name')}: {tee_date.isoformat()} {display} | available={available}")
+        print(f"WEBTRAC V15 MATCH {course.get('name')}: {tee_date.isoformat()} {display} | available={available}")
         slots.append(WebTracSlot(tee_date.isoformat(), display, players, url))
+    return slots
+
+
+def _direct_result_urls(code: str, tee_date: date, start_time: str, players: int) -> list[str]:
+    """
+    Vermont Systems WebTrac search pages accept their filter state through query
+    parameters in many deployments. We try a few compatible parameter spellings.
+    Results are filtered by course/date/time in the parser, so extra rows are safe.
+    """
+    d = tee_date.strftime("%m/%d/%Y")
+    bt = start_time.lower().replace(" ", "+")
+    base = "https://kylexingtonweb.myvscloud.com/webtrac/web/search.html"
+    candidates = [
+        f"{base}?module=GR&display=detail&secondarycode={code}&Date={d}&BeginDate={d}&begintime={bt}&players={players}&holes=18",
+        f"{base}?module=GR&display=detail&secondarycode={code}&Date={d}&begintime={bt}&players={players}",
+        f"{base}?module=GR&display=detail&secondarycode={code}&Date={d}&BeginTime={bt}&NumPlayers={players}&NumberOfHoles=18",
+        f"{base}?module=GR&display=detail&secondarycode={code}&Date={d}&begin_time={bt}&players={players}&holes=18",
+    ]
+    return candidates
+
+def _js_inventory(page: Page, course_name: str):
+    try:
+        data = page.evaluate("""
+        () => ({
+          forms: [...document.forms].map((f,i) => ({
+            i,
+            action: f.action,
+            method: f.method,
+            inputs: [...f.querySelectorAll('input,select,button')].map((e,j)=>({
+              j, tag:e.tagName, type:e.type||'', name:e.name||'', id:e.id||'',
+              value:e.value||'', aria:e.getAttribute('aria-label')||'',
+              text:(e.innerText||e.textContent||'').trim().slice(0,120)
+            }))
+          })),
+          buttons:[...document.querySelectorAll('button,input[type=button],input[type=submit]')].map((e,j)=>({
+            j,tag:e.tagName,type:e.type||'',name:e.name||'',id:e.id||'',
+            value:e.value||'',text:(e.innerText||e.textContent||'').trim().slice(0,120)
+          }))
+        })
+        """)
+        print(f"WEBTRAC V15 JS FORMS {course_name}: {data}")
+        return data
+    except Exception as exc:
+        print(f"WEBTRAC V15 JS INVENTORY FAILED {course_name}: {exc}")
+        return None
+
+def _parse_document(page: Page, course: dict, tee_date: date, start: time, end: time, players: int) -> list[WebTracSlot]:
+    # Parse the whole page body rather than relying on the table DOM, because
+    # Vermont Systems can render result rows with nested custom markup.
+    try:
+        body = _clean(page.locator("body").inner_text(), 200000)
+    except Exception:
+        return []
+    expected = tee_date.strftime("%m/%d/%Y")
+    name = (course.get("name") or course.get("course_name") or "")
+    low_name = name.lower()
+    aliases = {low_name}
+    if "picadome" in low_name or "gay brewer" in low_name:
+        aliases |= {"picadome golf course", "picadome", "gay brewer", "gay brewer jr"}
+    if "lakeside" in low_name:
+        aliases |= {"lakeside golf course", "lakeside"}
+    slots=[]
+    # Split around "Item Action" rows by scanning line windows.
+    lines=[ln.strip() for ln in body.splitlines() if ln.strip()]
+    for i, line in enumerate(lines):
+        if expected not in line:
+            continue
+        context=" ".join(lines[max(0,i-4):min(len(lines),i+6)])
+        cl=context.lower()
+        if not any(a in cl for a in aliases):
+            continue
+        tm=_parse_time(context)
+        if not tm or not _in_window(tm,start,end):
+            continue
+        available=len(AVAILABLE_RE.findall(context))
+        if available < players:
+            continue
+        display=tm.strftime("%I:%M %p").lstrip("0")
+        key=f"{tee_date.isoformat()}|{display}|{low_name}"
+        url=page.url
+        if key in {f"{s.tee_date}|{s.tee_time}|{low_name}" for s in slots}:
+            continue
+        print(f"WEBTRAC V15 MATCH {name}: {tee_date.isoformat()} {display} | available={available}")
+        slots.append(WebTracSlot(tee_date.isoformat(),display,players,url))
     return slots
 
 def scan(page: Page, course: dict, tee_date: date, start_time: str, end_time: str, players: int, diagnostic_dir: Path | None = None) -> list[WebTracSlot]:
     code = _course_code(course)
-    url = f"https://kylexingtonweb.myvscloud.com/webtrac/web/search.html?module=GR&secondarycode={code}"
     name = course.get("name") or "course"
-    print(f"WEBTRAC V14 START {name}: secondarycode={code}")
-    page.goto(url, wait_until="domcontentloaded", timeout=60000)
-    page.wait_for_timeout(1500)
-    print(f"WEBTRAC V14 PAGE {name}: {page.url}")
-    print(f"WEBTRAC V14 FRAMES {name}: {len(page.frames)}")
-    target_frame: Frame | None = None
-    # First pass: click any reveal and inspect all frames.
-    for frame in _frames(page):
+    start = _parse_time(start_time) or time(7,0)
+    end = _parse_time(end_time) or time(9,0)
+    print(f"WEBTRAC V15 START {name}: secondarycode={code}")
+    # First load the public tee-time search and reveal the filters if present.
+    base = f"https://kylexingtonweb.myvscloud.com/webtrac/web/search.html?module=GR&secondarycode={code}"
+    page.goto(base, wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(1200)
+    print(f"WEBTRAC V15 BASE PAGE {name}: {page.url}")
+    try:
+        reveal = page.get_by_role("button", name=re.compile(r"click\s*to\s*reveal", re.I))
+        if reveal.count():
+            reveal.first.click(force=True, timeout=10000)
+            page.wait_for_timeout(700)
+            print(f"WEBTRAC V15 REVEAL CLICKED {name}")
+    except Exception as exc:
+        print(f"WEBTRAC V15 REVEAL FAILED {name}: {exc}")
+    _js_inventory(page, name)
+
+    # Try server-side result URLs. This avoids relying on the dynamic search widgets.
+    candidates=_direct_result_urls(code, tee_date, start_time, players)
+    for idx,url in enumerate(candidates,1):
         try:
-            _reveal(frame, name)
-        except Exception:
-            pass
-    page.wait_for_timeout(1000)
-    # Second pass: inspect all frames; pick a frame with a date-like input if possible.
-    for frame in _frames(page):
-        selects, inputs, buttons = _inventory(frame, name)
-        if _find_date_input(frame) is not None:
-            target_frame = frame
-            break
-    if target_frame is None:
-        # Some WebTrac versions use text inputs with a surrounding label that doesn't map to aria.
-        for frame in _frames(page):
-            try:
-                text = frame.locator("body").inner_text()
-                if re.search(r"\bDate\b", text, re.I) and frame.locator("input").count() > 0:
-                    target_frame = frame
-                    break
-            except Exception:
-                continue
-    if target_frame is None:
-        print(f"WEBTRAC V14 DATE INPUT NOT FOUND {name} IN ANY FRAME")
-        _write_diag(page, name, tee_date, diagnostic_dir)
-        return []
-    if not _set_date(target_frame, tee_date, name):
-        _write_diag(page, name, tee_date, diagnostic_dir)
-        return []
-    _click_search(target_frame, name)
-    page.wait_for_timeout(1000)
-    _write_diag(page, name, tee_date, diagnostic_dir)
-    start = _parse_time(start_time) or time(7, 0)
-    end = _parse_time(end_time) or time(9, 0)
-    slots = _parse_results(target_frame, course, tee_date, start, end, players)
-    # Results may navigate into a different frame/page; scan all frames as fallback.
-    if not slots:
-        for frame in _frames(page):
-            alt = _parse_results(frame, course, tee_date, start, end, players)
-            if alt:
-                slots.extend(alt)
-    print(f"WEBTRAC V14 RESULT {name}: {tee_date.isoformat()} -> {len(slots)} matching slots")
-    return slots
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(1000)
+            body=_clean(page.locator("body").inner_text(), 200000)
+            print(f"WEBTRAC V15 CANDIDATE {name} #{idx}: {page.url}")
+            print(f"WEBTRAC V15 CANDIDATE {name} #{idx} BODY_HEAD: {_clean(body[:2500],2500)}")
+            slots=_parse_document(page,course,tee_date,start,end,players)
+            if slots:
+                _write_diag(page,name,tee_date,diagnostic_dir)
+                print(f"WEBTRAC V15 SUCCESS {name}: {len(slots)} matching slots via candidate #{idx}")
+                return slots
+            # If the page actually contains the target date and course, keep this
+            # candidate as a likely valid result page even when there are no matches.
+            if tee_date.strftime("%m/%d/%Y") in body and ("Tee Time Search Results" in body or "Search Results" in body):
+                _write_diag(page,name,tee_date,diagnostic_dir)
+                print(f"WEBTRAC V15 VALID RESULT PAGE {name}: no qualifying slots")
+                return []
+        except Exception as exc:
+            print(f"WEBTRAC V15 CANDIDATE FAILED {name} #{idx}: {exc}")
+
+    _write_diag(page,name,tee_date,diagnostic_dir)
+    print(f"WEBTRAC V15 NO RESULT PAGE {name}")
+    return []
