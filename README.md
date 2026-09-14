@@ -1,3 +1,12 @@
-# Golf Tee Time Alerts v7
+# Golf Tee Time Alerts
 
-Adds a WebTrac adapter and enables diagnostic scanning for Picadome and Lakeside on Saturday 2026-09-19, 07:00-09:00, 4 players, 18 holes. Weissinger Hills / TeeQuest remains enabled.
+Weekend golf tee-time monitor for 4 golfers.
+
+Current diagnostic scope:
+- Saturday/Sunday
+- 7:00 AM–9:00 AM
+- 18 holes
+- Weissinger Hills (TeeQuest)
+- Picadome and Lakeside (Lexington WebTrac)
+
+This version uses the current Lexington WebTrac domain (`kylexingtonweb.myvscloud.com`). Notifications remain disabled while course adapters are being validated.

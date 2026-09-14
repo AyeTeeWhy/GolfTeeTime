@@ -64,14 +64,14 @@
       "name": "Picadome",
       "platform": "webtrac",
       "enabled": true,
-      "url": "https://parks.lexingtonky.gov/wbwsc/webtrac.wsc/search.html?module=GR",
-      "course_name": "Picadome Golf Course"
+      "url": "https://kylexingtonweb.myvscloud.com/webtrac/web/search.html?module=GR&secondarycode=4",
+      "course_name": "Gay Brewer Jr. Course at Picadome"
     },
     {
       "name": "Lakeside",
       "platform": "webtrac",
       "enabled": true,
-      "url": "https://parks.lexingtonky.gov/wbwsc/webtrac.wsc/search.html?module=GR",
+      "url": "https://kylexingtonweb.myvscloud.com/webtrac/web/search.html?module=GR&secondarycode=4",
       "course_name": "Lakeside Golf Course"
     },
     {

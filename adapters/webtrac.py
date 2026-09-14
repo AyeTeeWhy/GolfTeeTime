@@ -33,16 +33,40 @@ def _clean(text: str, max_len: int = 700) -> str:
     text = " ".join((text or "").split())
     return text if len(text) <= max_len else text[: max_len - 3] + "..."
 
-def _select_by_label(select, candidate: str) -> bool:
+def _option_texts(select) -> list[str]:
     try:
-        select.select_option(label=re.compile(rf"^{re.escape(candidate)}$", re.I))
-        return True
+        return [t.strip() for t in select.locator("option").all_text_contents()]
     except Exception:
-        try:
-            select.select_option(label=re.compile(re.escape(candidate), re.I))
-            return True
-        except Exception:
-            return False
+        return []
+
+def _select_by_label(select, candidate: str) -> bool:
+    texts = _option_texts(select)
+    # Exact match first, then substring match.
+    for t in texts:
+        if t.strip().lower() == candidate.strip().lower():
+            try:
+                select.select_option(label=t)
+                return True
+            except Exception:
+                pass
+    for t in texts:
+        if candidate.strip().lower() in t.strip().lower() or t.strip().lower() in candidate.strip().lower():
+            try:
+                select.select_option(label=t)
+                return True
+            except Exception:
+                pass
+    # Fall back to any option whose visible text contains a recognizable
+    # player/hole number when the site formats the labels.
+    if str(candidate).isdigit():
+        for t in texts:
+            if re.search(rf"\b{re.escape(str(candidate))}\b", t):
+                try:
+                    select.select_option(label=t)
+                    return True
+                except Exception:
+                    pass
+    return False
 
 def _write_diagnostic(page: Page, course_name: str, tee_date: date, diagnostic_dir: Path, requested_players: int) -> None:
     diagnostic_dir.mkdir(parents=True, exist_ok=True)
@@ -102,13 +126,32 @@ def scan(page: Page, course: dict, tee_date: date, start_time: str, end_time: st
     for i in range(selects.count()):
         s = selects.nth(i)
         try:
-            txt = s.inner_text()
-            inventory.append({"i": i, "id": s.get_attribute("id"), "name": s.get_attribute("name"), "text": _clean(txt, 350)})
-            if course.get("course_name", course["name"]).lower() in txt.lower(): course_select = s
-            if re.search(r"\b1\b.*\b2\b.*\b3\b.*\b4\b.*\b5\b", txt, re.S): player_select = s
-            if "18 Holes" in txt and "9 Holes" in txt: holes_select = s
+            options = _option_texts(s)
+            txt = " | ".join(options)
+            inventory.append({
+                "i": i,
+                "id": s.get_attribute("id"),
+                "name": s.get_attribute("name"),
+                "text": _clean(txt, 500),
+                "options": options[:30],
+            })
+            if course.get("course_name", course["name"]).lower() in txt.lower():
+                course_select = s
+            # WebTrac labels this as a player-count select. Detect it by
+            # the presence of a literal 4-player option rather than by the
+            # entire option list having a specific ordering.
+            if any(re.search(r"\b4\b", opt.strip()) for opt in options):
+                joined = " ".join(options).lower()
+                if player_select is None and ("player" in joined or any(opt.strip() == "4" for opt in options)):
+                    player_select = s
+            if any(re.search(r"18\s*holes?", opt, re.I) for opt in options):
+                holes_select = s
         except Exception:
             pass
+    print("WEBTRAC SELECT INVENTORY")
+    for item in inventory:
+        print(f"  select[{item['i']}] id={item['id']} name={item['name']} options={item['options']}")
+
     if not course_select:
         raise RuntimeError(f"WebTrac Course select not found. Select inventory: {inventory}")
     if not player_select:
