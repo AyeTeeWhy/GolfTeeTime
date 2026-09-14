@@ -73,8 +73,30 @@ def _write_diag(page: Page, course_name: str, tee_date: date, diagnostic_dir: Pa
         pass
 
 
+
+def _reveal_search_controls(page: Page, course_name: str) -> None:
+    """WebTrac can initially expose only a collapsed search panel with a Click to reveal button."""
+    candidates = [
+        page.get_by_role("button", name=re.compile(r"click\s*to\s*reveal", re.I)),
+        page.get_by_text(re.compile(r"click\s*to\s*reveal", re.I)),
+        page.locator("button").filter(has_text=re.compile(r"click\s*to\s*reveal", re.I)),
+        page.locator("input[type='button'], input[type='submit']").filter(has_text=re.compile(r"click\s*to\s*reveal", re.I)),
+    ]
+    for loc in candidates:
+        try:
+            if loc.count() > 0:
+                loc.first.scroll_into_view_if_needed(timeout=5000)
+                loc.first.click(force=True, timeout=10000)
+                page.wait_for_timeout(750)
+                print(f"WEBTRAC V13 REVEAL CLICKED {course_name}")
+                return
+        except Exception as exc:
+            print(f"WEBTRAC V13 REVEAL ATTEMPT FAILED {course_name}: {exc}")
+    print(f"WEBTRAC V13 REVEAL BUTTON NOT FOUND {course_name}")
+
+
 def _print_form_inventory(page: Page, course_name: str) -> None:
-    print(f"WEBTRAC V12 FORM INVENTORY {course_name}")
+    print(f"WEBTRAC V13 FORM INVENTORY {course_name}")
     try:
         selects = page.locator("select")
         for i in range(selects.count()):
@@ -125,27 +147,27 @@ def _find_date_input(page: Page):
 def _set_date(page: Page, tee_date: date, course_name: str) -> bool:
     inp = _find_date_input(page)
     if inp is None:
-        print(f"WEBTRAC V12 DATE INPUT NOT FOUND {course_name}")
+        print(f"WEBTRAC V13 DATE INPUT NOT FOUND {course_name}")
         return False
     target = tee_date.strftime("%m/%d/%Y")
     try:
         inp.scroll_into_view_if_needed()
         inp.fill(target)
         inp.press("Tab")
-        print(f"WEBTRAC V12 DATE SET {course_name}: {target}")
+        print(f"WEBTRAC V13 DATE SET {course_name}: {target}")
         return True
     except Exception as exc:
-        print(f"WEBTRAC V12 DATE SET FAILED {course_name}: {exc}")
+        print(f"WEBTRAC V13 DATE SET FAILED {course_name}: {exc}")
         # JS fallback for date/masked inputs.
         try:
             page.evaluate(
                 """([el, value]) => { const proto=el.constructor?.prototype; const desc=proto && Object.getOwnPropertyDescriptor(proto,'value'); if(desc?.set){desc.set.call(el,value);} else {el.value=value;} el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); }""",
                 [inp, target],
             )
-            print(f"WEBTRAC V12 DATE JS SET {course_name}: {target}")
+            print(f"WEBTRAC V13 DATE JS SET {course_name}: {target}")
             return True
         except Exception as jsex:
-            print(f"WEBTRAC V12 DATE JS FAILED {course_name}: {jsex}")
+            print(f"WEBTRAC V13 DATE JS FAILED {course_name}: {jsex}")
             return False
 
 
@@ -165,10 +187,10 @@ def _click_search(page: Page, course_name: str) -> bool:
             except PlaywrightTimeoutError:
                 pass
             page.wait_for_timeout(1500)
-            print(f"WEBTRAC V12 SEARCH CLICKED {course_name}: url={page.url}")
+            print(f"WEBTRAC V13 SEARCH CLICKED {course_name}: url={page.url}")
             return True
         except Exception as exc:
-            print(f"WEBTRAC V12 SEARCH CLICK FAILED {course_name}: {exc}")
+            print(f"WEBTRAC V13 SEARCH CLICK FAILED {course_name}: {exc}")
     return False
 
 
@@ -225,7 +247,7 @@ def _parse_results(page: Page, course: dict, tee_date: date, start: time, end: t
         if key in seen:
             continue
         seen.add(key)
-        print(f"WEBTRAC V12 MATCH {course.get('name')}: {tee_date.isoformat()} {display} | available={available}")
+        print(f"WEBTRAC V13 MATCH {course.get('name')}: {tee_date.isoformat()} {display} | available={available}")
         slots.append(WebTracSlot(tee_date.isoformat(), display, players, url))
     return slots
 
@@ -234,10 +256,11 @@ def scan(page: Page, course: dict, tee_date: date, start_time: str, end_time: st
     code = _course_code(course)
     base = "https://kylexingtonweb.myvscloud.com/webtrac/web/search.html"
     url = f"{base}?module=GR&secondarycode={code}"
-    print(f"WEBTRAC V12 START {course.get('name')}: secondarycode={code}")
+    print(f"WEBTRAC V13 START {course.get('name')}: secondarycode={code}")
     page.goto(url, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(1000)
-    print(f"WEBTRAC V12 PAGE {course.get('name')}: {page.url}")
+    print(f"WEBTRAC V13 PAGE {course.get('name')}: {page.url}")
+    _reveal_search_controls(page, course.get("name") or "course")
     _print_form_inventory(page, course.get("name") or "course")
     _set_date(page, tee_date, course.get("name") or "course")
     _click_search(page, course.get("name") or "course")
@@ -246,5 +269,5 @@ def scan(page: Page, course: dict, tee_date: date, start_time: str, end_time: st
     start = _parse_time(start_time) or time(7, 0)
     end = _parse_time(end_time) or time(9, 0)
     slots = _parse_results(page, course, tee_date, start, end, players)
-    print(f"WEBTRAC V12 RESULT {course.get('name')}: {tee_date.isoformat()} -> {len(slots)} matching slots")
+    print(f"WEBTRAC V13 RESULT {course.get('name')}: {tee_date.isoformat()} -> {len(slots)} matching slots")
     return slots
