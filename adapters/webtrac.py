@@ -6,9 +6,11 @@ from datetime import date, time
 from pathlib import Path
 from urllib.parse import urljoin
 
-from playwright.sync_api import Page
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
 TIME_RE = re.compile(r"\b(0?[1-9]|1[0-2]):([0-5]\d)\s*(AM|PM)\b", re.I)
+DATE_RE = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
+AVAILABLE_RE = re.compile(r"\bAvailable\b", re.I)
 
 @dataclass(frozen=True)
 class WebTracSlot:
@@ -17,201 +19,232 @@ class WebTracSlot:
     players: int
     url: str
 
+
 def _parse_time(text: str) -> time | None:
     m = TIME_RE.search(text or "")
-    if not m: return None
+    if not m:
+        return None
     h, minute = int(m.group(1)), int(m.group(2))
     ap = m.group(3).upper()
-    if ap == "PM" and h != 12: h += 12
-    if ap == "AM" and h == 12: h = 0
+    if ap == "PM" and h != 12:
+        h += 12
+    if ap == "AM" and h == 12:
+        h = 0
     return time(h, minute)
+
 
 def _in_window(t: time, start: time, end: time) -> bool:
     return start <= t <= end
 
-def _clean(text: str, max_len: int = 700) -> str:
+
+def _clean(text: str, max_len: int = 2200) -> str:
     text = " ".join((text or "").split())
     return text if len(text) <= max_len else text[: max_len - 3] + "..."
 
-def _option_texts(select) -> list[str]:
+
+def _course_code(course: dict) -> str:
+    if course.get("secondarycode"):
+        return str(course["secondarycode"])
+    name = (course.get("name") or course.get("course_name") or "").lower()
+    if "lakeside" in name:
+        return "3"
+    if "picadome" in name or "gay brewer" in name:
+        return "5"
+    raise RuntimeError(f"No WebTrac secondarycode configured for {course.get('name')}")
+
+
+def _write_diag(page: Page, course_name: str, tee_date: date, diagnostic_dir: Path | None) -> None:
+    if diagnostic_dir is None:
+        return
+    diagnostic_dir.mkdir(parents=True, exist_ok=True)
+    safe = re.sub(r"[^A-Za-z0-9]+", "_", course_name).strip("_").lower()
+    stem = diagnostic_dir / f"webtrac_v12_{safe}_{tee_date.isoformat()}"
     try:
-        return [t.strip() for t in select.locator("option").all_text_contents()]
+        stem.with_suffix(".html").write_text(page.content(), encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        stem.with_suffix(".txt").write_text(page.locator("body").inner_text(), encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        page.screenshot(path=str(stem.with_suffix(".png")), full_page=True)
+    except Exception:
+        pass
+
+
+def _print_form_inventory(page: Page, course_name: str) -> None:
+    print(f"WEBTRAC V12 FORM INVENTORY {course_name}")
+    try:
+        selects = page.locator("select")
+        for i in range(selects.count()):
+            s = selects.nth(i)
+            print(
+                f"  SELECT {i}: name={s.get_attribute('name')!r} id={s.get_attribute('id')!r} "
+                f"aria={s.get_attribute('aria-label')!r} value={s.input_value()}"
+            )
+    except Exception:
+        pass
+    try:
+        inputs = page.locator("input")
+        for i in range(min(inputs.count(), 20)):
+            inp = inputs.nth(i)
+            print(
+                f"  INPUT {i}: type={inp.get_attribute('type')!r} name={inp.get_attribute('name')!r} "
+                f"id={inp.get_attribute('id')!r} placeholder={inp.get_attribute('placeholder')!r} "
+                f"aria={inp.get_attribute('aria-label')!r} value={inp.input_value()!r}"
+            )
+    except Exception:
+        pass
+    try:
+        buttons = page.get_by_role("button")
+        for i in range(min(buttons.count(), 20)):
+            b = buttons.nth(i)
+            print(f"  BUTTON {i}: text={_clean(b.inner_text(),120)!r} type={b.get_attribute('type')!r}")
+    except Exception:
+        pass
+
+
+def _find_date_input(page: Page):
+    patterns = [
+        page.get_by_label(re.compile(r"^Date$", re.I)),
+        page.locator("input[name*='date' i]"),
+        page.locator("input[id*='date' i]"),
+        page.locator("input[aria-label*='date' i]"),
+        page.locator("input[placeholder*='date' i]"),
+    ]
+    for loc in patterns:
+        try:
+            if loc.count() > 0:
+                return loc.first
+        except Exception:
+            continue
+    return None
+
+
+def _set_date(page: Page, tee_date: date, course_name: str) -> bool:
+    inp = _find_date_input(page)
+    if inp is None:
+        print(f"WEBTRAC V12 DATE INPUT NOT FOUND {course_name}")
+        return False
+    target = tee_date.strftime("%m/%d/%Y")
+    try:
+        inp.scroll_into_view_if_needed()
+        inp.fill(target)
+        inp.press("Tab")
+        print(f"WEBTRAC V12 DATE SET {course_name}: {target}")
+        return True
+    except Exception as exc:
+        print(f"WEBTRAC V12 DATE SET FAILED {course_name}: {exc}")
+        # JS fallback for date/masked inputs.
+        try:
+            page.evaluate(
+                """([el, value]) => { const proto=el.constructor?.prototype; const desc=proto && Object.getOwnPropertyDescriptor(proto,'value'); if(desc?.set){desc.set.call(el,value);} else {el.value=value;} el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); }""",
+                [inp, target],
+            )
+            print(f"WEBTRAC V12 DATE JS SET {course_name}: {target}")
+            return True
+        except Exception as jsex:
+            print(f"WEBTRAC V12 DATE JS FAILED {course_name}: {jsex}")
+            return False
+
+
+def _click_search(page: Page, course_name: str) -> bool:
+    locators = [
+        page.get_by_role("button", name=re.compile(r"^Search$", re.I)),
+        page.locator("input[type='submit'][value='Search']"),
+        page.locator("button:has-text('Search')"),
+    ]
+    for loc in locators:
+        try:
+            if loc.count() == 0:
+                continue
+            loc.first.click(force=True, timeout=10000)
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=30000)
+            except PlaywrightTimeoutError:
+                pass
+            page.wait_for_timeout(1500)
+            print(f"WEBTRAC V12 SEARCH CLICKED {course_name}: url={page.url}")
+            return True
+        except Exception as exc:
+            print(f"WEBTRAC V12 SEARCH CLICK FAILED {course_name}: {exc}")
+    return False
+
+
+def _rows(page: Page):
+    try:
+        n = page.locator("tr").count()
+        return [page.locator("tr").nth(i) for i in range(n)]
     except Exception:
         return []
 
-def _select_by_label(select, candidate: str) -> bool:
-    texts = _option_texts(select)
-    # Exact match first, then substring match.
-    for t in texts:
-        if t.strip().lower() == candidate.strip().lower():
-            try:
-                select.select_option(label=t)
-                return True
-            except Exception:
-                pass
-    for t in texts:
-        if candidate.strip().lower() in t.strip().lower() or t.strip().lower() in candidate.strip().lower():
-            try:
-                select.select_option(label=t)
-                return True
-            except Exception:
-                pass
-    # Fall back to any option whose visible text contains a recognizable
-    # player/hole number when the site formats the labels.
-    if str(candidate).isdigit():
-        for t in texts:
-            if re.search(rf"\b{re.escape(str(candidate))}\b", t):
-                try:
-                    select.select_option(label=t)
-                    return True
-                except Exception:
-                    pass
-    return False
 
-def _write_diagnostic(page: Page, course_name: str, tee_date: date, diagnostic_dir: Path, requested_players: int) -> None:
-    diagnostic_dir.mkdir(parents=True, exist_ok=True)
-    safe = re.sub(r"[^A-Za-z0-9]+", "_", course_name).strip("_").lower()
-    stem = diagnostic_dir / f"webtrac_{safe}_{tee_date.isoformat()}"
-    try: body = page.locator("body").inner_text()
-    except Exception as exc: body = f"<body text unavailable: {exc}>"
-    (stem.with_suffix(".txt")).write_text(body, encoding="utf-8")
-    try: (stem.with_suffix(".html")).write_text(page.content(), encoding="utf-8")
-    except Exception: pass
-    try: page.screenshot(path=str(stem.with_suffix(".png")), full_page=True)
-    except Exception: pass
+def _parse_results(page: Page, course: dict, tee_date: date, start: time, end: time, players: int) -> list[WebTracSlot]:
+    expected_date = tee_date.strftime("%m/%d/%Y")
+    name = (course.get("name") or course.get("course_name") or "").lower()
+    aliases = {name}
+    if "picadome" in name or "gay brewer" in name:
+        aliases.update({"picadome golf course", "picadome"})
+    if "lakeside" in name:
+        aliases.update({"lakeside golf course", "lakeside"})
 
-def _find_date_input(page: Page):
-    # WebTrac currently renders Date as a visible text input. Prefer inputs whose
-    # id/name mentions date; otherwise use the first visible text/date control.
-    inputs = page.locator("input")
-    ranked = []
-    fallback = []
-    for i in range(inputs.count()):
-        inp = inputs.nth(i)
+    slots: list[WebTracSlot] = []
+    seen: set[str] = set()
+    for row in _rows(page):
         try:
-            if not inp.is_visible(): continue
-            typ = (inp.get_attribute("type") or "").lower()
-            name = inp.get_attribute("name") or ""
-            ident = inp.get_attribute("id") or ""
-            ph = inp.get_attribute("placeholder") or ""
-            meta = f"{name} {ident} {ph}"
-            if typ in ("date", "text"):
-                fallback.append(inp)
-                if re.search(r"date|begindate|searchdate", meta, re.I): ranked.append(inp)
+            text = _clean(row.inner_text())
+        except Exception:
+            continue
+        low = text.lower()
+        if not any(a and a in low for a in aliases):
+            continue
+        if expected_date not in text:
+            continue
+        tm = _parse_time(text)
+        if tm is None or not _in_window(tm, start, end):
+            continue
+        available = len(AVAILABLE_RE.findall(text))
+        if available < players:
+            continue
+        href = None
+        try:
+            links = row.locator("a")
+            for i in range(links.count()):
+                link = links.nth(i)
+                label = _clean(link.inner_text(), 100)
+                if re.search(r"add\s*to\s*cart", label, re.I):
+                    href = link.get_attribute("href")
+                    if href:
+                        break
         except Exception:
             pass
-    return ranked[0] if ranked else (fallback[0] if fallback else None)
+        url = urljoin(page.url, href) if href else page.url
+        display = tm.strftime("%I:%M %p").lstrip("0")
+        key = f"{tee_date.isoformat()}|{display}|{name}"
+        if key in seen:
+            continue
+        seen.add(key)
+        print(f"WEBTRAC V12 MATCH {course.get('name')}: {tee_date.isoformat()} {display} | available={available}")
+        slots.append(WebTracSlot(tee_date.isoformat(), display, players, url))
+    return slots
 
-def _find_begin_time_input(page: Page):
-    inputs = page.locator("input")
-    for i in range(inputs.count()):
-        inp = inputs.nth(i)
-        try:
-            if not inp.is_visible(): continue
-            typ = (inp.get_attribute("type") or "").lower()
-            meta = f"{inp.get_attribute('name') or ''} {inp.get_attribute('id') or ''} {inp.get_attribute('placeholder') or ''}"
-            if re.search(r"begin.*time|begintime", meta, re.I): return inp, typ
-        except Exception:
-            pass
-    return None, None
 
 def scan(page: Page, course: dict, tee_date: date, start_time: str, end_time: str, players: int, diagnostic_dir: Path | None = None) -> list[WebTracSlot]:
-    base = course.get("url", "https://parks.lexingtonky.gov/wbwsc/webtrac.wsc/search.html?module=GR")
-    page.goto(base, wait_until="domcontentloaded", timeout=60000)
+    code = _course_code(course)
+    base = "https://kylexingtonweb.myvscloud.com/webtrac/web/search.html"
+    url = f"{base}?module=GR&secondarycode={code}"
+    print(f"WEBTRAC V12 START {course.get('name')}: secondarycode={code}")
+    page.goto(url, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(1000)
-
-    selects = page.locator("select")
-    inventory = []
-    course_select = player_select = holes_select = None
-    for i in range(selects.count()):
-        s = selects.nth(i)
-        try:
-            options = _option_texts(s)
-            txt = " | ".join(options)
-            inventory.append({
-                "i": i,
-                "id": s.get_attribute("id"),
-                "name": s.get_attribute("name"),
-                "text": _clean(txt, 500),
-                "options": options[:30],
-            })
-            if course.get("course_name", course["name"]).lower() in txt.lower():
-                course_select = s
-            # WebTrac labels this as a player-count select. Detect it by
-            # the presence of a literal 4-player option rather than by the
-            # entire option list having a specific ordering.
-            if any(re.search(r"\b4\b", opt.strip()) for opt in options):
-                joined = " ".join(options).lower()
-                if player_select is None and ("player" in joined or any(opt.strip() == "4" for opt in options)):
-                    player_select = s
-            if any(re.search(r"18\s*holes?", opt, re.I) for opt in options):
-                holes_select = s
-        except Exception:
-            pass
-    print("WEBTRAC SELECT INVENTORY")
-    for item in inventory:
-        print(f"  select[{item['i']}] id={item['id']} name={item['name']} options={item['options']}")
-
-    if not course_select:
-        raise RuntimeError(f"WebTrac Course select not found. Select inventory: {inventory}")
-    if not player_select:
-        raise RuntimeError(f"WebTrac player select not found. Select inventory: {inventory}")
-    if not holes_select:
-        raise RuntimeError(f"WebTrac holes select not found. Select inventory: {inventory}")
-    if not _select_by_label(course_select, course.get("course_name", course["name"])):
-        raise RuntimeError(f"Could not select course {course.get('course_name', course['name'])}")
-    if not _select_by_label(player_select, str(players)):
-        raise RuntimeError(f"Could not select {players} players")
-    if not _select_by_label(holes_select, "18 Holes"):
-        raise RuntimeError("Could not select 18 Holes")
-
-    date_input = _find_date_input(page)
-    if date_input is None:
-        raise RuntimeError("WebTrac Date input not found")
-    typ = (date_input.get_attribute("type") or "").lower()
-    date_input.fill(tee_date.isoformat() if typ == "date" else tee_date.strftime("%m/%d/%Y"))
-
-    begin_input, begin_type = _find_begin_time_input(page)
-    if begin_input is not None:
-        try:
-            begin_input.fill(start_time if begin_type == "time" else "7:00 AM")
-        except Exception:
-            pass
-
-    search = page.get_by_role("button", name=re.compile(r"^Search$", re.I))
-    if search.count() == 0:
-        raise RuntimeError("WebTrac Search button not found")
-    search.first.click()
-    page.wait_for_load_state("domcontentloaded", timeout=60000)
-    page.wait_for_timeout(1200)
-
-    if diagnostic_dir is not None:
-        _write_diagnostic(page, course["name"], tee_date, diagnostic_dir, players)
-
-    start = _parse_time(start_time) or time(7,0)
-    end = _parse_time(end_time) or time(9,0)
-    out = []
-    rows = page.locator("tr")
-    course_name = course.get("course_name", course["name"])
-    for i in range(rows.count()):
-        row = rows.nth(i)
-        try: text = _clean(row.inner_text(), 1200)
-        except Exception: continue
-        if course_name.lower() not in text.lower(): continue
-        tm = _parse_time(text)
-        if tm is None or not _in_window(tm, start, end): continue
-        available = len(re.findall(r"\bAvailable\b", text, re.I))
-        if available < players: continue
-        href = None
-        links = row.locator("a")
-        for j in range(links.count()):
-            try:
-                if "add to cart" in links.nth(j).inner_text().strip().lower():
-                    href = links.nth(j).get_attribute("href"); break
-            except Exception: pass
-        absolute = urljoin(page.url, href) if href else page.url
-        display = tm.strftime("%I:%M %p").lstrip("0")
-        out.append(WebTracSlot(tee_date.isoformat(), display, players, absolute))
-        print(f"WEBTRAC MATCH {course['name']} {tee_date.isoformat()}: {display} | available={available}")
-    print(f"WEBTRAC RESULT {course['name']} {tee_date.isoformat()}: {len(out)} matching {players}-player slots")
-    return out
+    print(f"WEBTRAC V12 PAGE {course.get('name')}: {page.url}")
+    _print_form_inventory(page, course.get("name") or "course")
+    _set_date(page, tee_date, course.get("name") or "course")
+    _click_search(page, course.get("name") or "course")
+    page.wait_for_timeout(1000)
+    _write_diag(page, course.get("name") or "course", tee_date, diagnostic_dir)
+    start = _parse_time(start_time) or time(7, 0)
+    end = _parse_time(end_time) or time(9, 0)
+    slots = _parse_results(page, course, tee_date, start, end, players)
+    print(f"WEBTRAC V12 RESULT {course.get('name')}: {tee_date.isoformat()} -> {len(slots)} matching slots")
+    return slots
