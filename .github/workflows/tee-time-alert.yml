@@ -37,8 +37,8 @@ jobs:
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
         run: python monitor.py
 
-      - name: Upload debug files when a check fails
-        if: failure()
+      - name: Upload diagnostic files
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: golf-tee-time-debug
