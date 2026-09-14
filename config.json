@@ -1,0 +1,22 @@
+{
+  "players": 4,
+  "start_time": "07:00",
+  "end_time": "09:00",
+  "days": ["SATURDAY", "SUNDAY"],
+  "timezone": "America/New_York",
+  "lookahead_days": 21,
+  "state_db": "state/availability.sqlite3",
+  "courses": [
+    {"name": "My Old Kentucky Home", "platform": "unknown", "enabled": false, "url": ""},
+    {"name": "Weissinger Hills", "platform": "teequest", "enabled": true, "url": "https://teetimes.teequest.com/63"},
+    {"name": "Cherry Blossom", "platform": "unknown", "enabled": false, "url": ""},
+    {"name": "Maywood CC", "platform": "unknown", "enabled": false, "url": ""},
+    {"name": "Gibson Bay", "platform": "foreup", "enabled": false, "url": "https://gibsonbay.com/"},
+    {"name": "Connemara", "platform": "teeitup", "enabled": false, "url": "https://connemara-golf-course.book.teeitup.com/"},
+    {"name": "Rosewood CC", "platform": "unknown", "enabled": false, "url": ""},
+    {"name": "Thoroughbred", "platform": "unknown", "enabled": false, "url": ""},
+    {"name": "Picadome", "platform": "webtrac", "enabled": true, "url": "https://parks.lexingtonky.gov/wbwsc/webtrac.wsc/search.html?module=GR"},
+    {"name": "Lakeside", "platform": "webtrac", "enabled": true, "url": "https://parks.lexingtonky.gov/wbwsc/webtrac.wsc/search.html?module=GR"},
+    {"name": "Quail Chase", "platform": "golfback", "enabled": false, "url": "https://quailchase.com/tee-times/"}
+  ]
+}
