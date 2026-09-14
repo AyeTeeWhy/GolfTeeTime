@@ -233,7 +233,10 @@ def main() -> int:
     cfg = load_config()
     tz = ZoneInfo(cfg.get("timezone", "America/New_York"))
     today = datetime.now(tz).date()
-    dates = weekend_dates(today, int(cfg.get("lookahead_days", 21)))
+    if cfg.get("diagnostic_dates"):
+        dates = [dtparser.parse(x).date() for x in cfg["diagnostic_dates"]]
+    else:
+        dates = weekend_dates(today, int(cfg.get("lookahead_days", 21)))
     print(f"Scanning weekend dates: {', '.join(d.isoformat() for d in dates)}")
     print(f"Target: {cfg['players']} golfers, {cfg['start_time']}–{cfg['end_time']} {cfg.get('timezone','ET')}")
 
@@ -266,7 +269,9 @@ def main() -> int:
 
         browser.close()
 
-    if all_new:
+    if all_new and cfg.get("diagnostic_mode", False):
+        print("DIAGNOSTIC MODE: alerts suppressed; matching slots were detected but no notification will be sent.")
+    elif all_new:
         topic = os.environ.get("NTFY_TOPIC")
         if topic:
             send_ntfy(all_new, topic)
