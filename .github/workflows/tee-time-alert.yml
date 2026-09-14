@@ -3,7 +3,7 @@ name: Golf Tee Time Alerts
 on:
   workflow_dispatch:
   schedule:
-    # GitHub's minimum scheduled cadence is 5 minutes.
+    # GitHub Actions scheduled workflows run no more often than every 5 minutes.
     - cron: '*/5 * * * *'
 
 jobs:
@@ -11,8 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -34,12 +37,22 @@ jobs:
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
         run: python monitor.py
 
+      - name: Upload debug files when a check fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golf-tee-time-debug
+          path: debug/
+          if-no-files-found: ignore
+
       - name: Persist alert state
+        if: always()
         run: |
-          if git status --porcelain | grep -q state/availability.sqlite3; then
+          if git status --porcelain | grep -q 'state/availability.sqlite3'; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add state/availability.sqlite3
             git commit -m "Update tee-time alert state" || true
+            git pull --rebase origin main || true
             git push || true
           fi
