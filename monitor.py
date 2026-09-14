@@ -14,6 +14,7 @@ from dateutil import parser as dtparser
 from playwright.sync_api import sync_playwright
 
 from adapters.teequest import scan as teequest_scan
+from adapters.webtrac import scan as webtrac_scan
 
 BASE = Path(__file__).resolve().parent
 TZ = ZoneInfo("America/New_York")
@@ -207,6 +208,18 @@ def monitor_teequest(page, course: dict, dates: list[date], cfg: dict) -> ScanRe
         return ScanResult(course["name"], [], False, str(exc))
 
 
+def monitor_webtrac(page, course: dict, dates: list[date], cfg: dict) -> ScanResult:
+    slots: list[Slot] = []
+    try:
+        for d in dates:
+            found = webtrac_scan(page, course, d, cfg["start_time"], cfg["end_time"], int(cfg["players"]), diagnostic_dir=(BASE / "debug" / "webtrac") if cfg.get("diagnostic_mode", False) else None)
+            for s in found:
+                slots.append(Slot(course["name"], s.tee_date, s.tee_time, s.players, s.url))
+        return ScanResult(course["name"], dedupe(slots), True)
+    except Exception as exc:
+        return ScanResult(course["name"], [], False, str(exc))
+
+
 def monitor_unsupported(course: dict) -> ScanResult:
     return ScanResult(course["name"], [], False, f"Adapter '{course['platform']}' is not activated yet.")
 
@@ -253,13 +266,15 @@ def main() -> int:
             platform = course["platform"]
             if platform == "teequest":
                 result = monitor_teequest(page, course, dates, cfg)
+            elif platform == "webtrac":
+                result = monitor_webtrac(page, course, dates, cfg)
             else:
                 result = monitor_unsupported(course)
 
             if not result.ok:
                 failures.append(f"{course['name']}: {result.error}")
                 print(f"ERROR {course['name']}: {result.error}")
-                if platform == "teequest":
+                if platform in ("teequest", "webtrac"):
                     save_debug(page, course["name"])
                 continue
 

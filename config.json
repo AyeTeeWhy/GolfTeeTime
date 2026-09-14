@@ -7,7 +7,7 @@
     "SUNDAY"
   ],
   "timezone": "America/New_York",
-  "lookahead_days": 21,
+  "lookahead_days": 5,
   "state_db": "state/availability.sqlite3",
   "courses": [
     {
@@ -63,14 +63,16 @@
     {
       "name": "Picadome",
       "platform": "webtrac",
-      "enabled": false,
-      "url": "https://parks.lexingtonky.gov/wbwsc/webtrac.wsc/search.html?module=GR"
+      "enabled": true,
+      "url": "https://parks.lexingtonky.gov/wbwsc/webtrac.wsc/search.html?module=GR",
+      "course_name": "Picadome Golf Course"
     },
     {
       "name": "Lakeside",
       "platform": "webtrac",
-      "enabled": false,
-      "url": "https://parks.lexingtonky.gov/wbwsc/webtrac.wsc/search.html?module=GR"
+      "enabled": true,
+      "url": "https://parks.lexingtonky.gov/wbwsc/webtrac.wsc/search.html?module=GR",
+      "course_name": "Lakeside Golf Course"
     },
     {
       "name": "Quail Chase",
@@ -79,5 +81,8 @@
       "url": "https://quailchase.com/tee-times/"
     }
   ],
-  "diagnostic_mode": true
+  "diagnostic_mode": true,
+  "diagnostic_dates": [
+    "2026-09-19"
+  ]
 }
