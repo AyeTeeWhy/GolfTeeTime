@@ -238,6 +238,7 @@ def save_debug(page, course: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--headed", action="store_true")
+    ap.add_argument("--force", action="store_true", help="Run now even outside the normal time window")
     args = ap.parse_args()
 
     cfg = load_config()
@@ -246,7 +247,7 @@ def main() -> int:
     # GitHub cron runs hourly; only perform the real scan every 2 hours
     # during the requested 6 AM-8 PM Eastern window. This keeps the schedule
     # aligned across daylight-saving changes.
-    if not (6 <= now_local.hour <= 20 and now_local.hour % 2 == 0):
+    if (not args.force) and not (6 <= now_local.hour <= 20 and now_local.hour % 2 == 0):
         print(f"Outside scan window ({now_local.strftime('%Y-%m-%d %H:%M %Z')}); exiting.")
         return 0
 
