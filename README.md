@@ -1,47 +1,14 @@
-# Local WebTrac Test
+# Golf Tee Time Alerts
 
-This is a local-only diagnostic for Lexington's WebTrac golf tee-time system.
+GitHub-based monitor for Weissinger Hills (TeeQuest).
 
-Why local? GitHub Actions was blocked by the site's Cloudflare layer while requesting WebTrac search URLs. This test runs from your normal Windows PC and uses an installed Edge/Chrome browser when available.
+## Current rules
+- Sunday only
+- Next 7 days
+- 7:00 AM-8:59 AM
+- 4 golfers requested
+- Runs every 2 hours from 6 AM through 8 PM America/New_York
+- Sends a notification every scan when qualifying tee times exist
+- Sends a separate "No Tee Time" notification when none exist
 
-## Setup
-
-From the repo root:
-
-```powershell
-pip install -r requirements.txt
-playwright install chromium
-```
-
-## Run
-
-From the repo root:
-
-```powershell
-python local_webtrac_test/webtrac_local.py --course both
-```
-
-To test only one course:
-
-```powershell
-python local_webtrac_test/webtrac_local.py --course Picadome
-python local_webtrac_test/webtrac_local.py --course Lakeside
-```
-
-To test a specific Saturday/Sunday:
-
-```powershell
-python local_webtrac_test/webtrac_local.py --course both --date 09/19/2026
-```
-
-The browser is intentionally visible. If the site presents a normal browser verification/challenge, you can complete it manually during the test. The script saves HTML, text, and screenshots under `local_webtrac_test/debug/` whenever it cannot find a control or a matching result.
-
-## Scope
-
-The test only looks for:
-- Saturday/Sunday
-- 7:00 AM through 8:59 AM
-- 4-player availability
-- 18-hole tee times
-
-It does not book or add anything to a cart.
+Picadome and Lakeside are intentionally disabled here because their WebTrac monitoring runs locally on the Windows PC.

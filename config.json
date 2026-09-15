@@ -3,11 +3,10 @@
   "start_time": "07:00",
   "end_time": "09:00",
   "days": [
-    "SATURDAY",
     "SUNDAY"
   ],
   "timezone": "America/New_York",
-  "lookahead_days": 5,
+  "lookahead_days": 7,
   "state_db": "state/availability.sqlite3",
   "courses": [
     {
@@ -63,14 +62,14 @@
     {
       "name": "Picadome",
       "platform": "webtrac",
-      "enabled": true,
+      "enabled": false,
       "url": "https://kylexingtonweb.myvscloud.com/webtrac/web/search.html?module=GR&secondarycode=4",
       "course_name": "Gay Brewer Jr. Course at Picadome"
     },
     {
       "name": "Lakeside",
       "platform": "webtrac",
-      "enabled": true,
+      "enabled": false,
       "url": "https://kylexingtonweb.myvscloud.com/webtrac/web/search.html?module=GR&secondarycode=4",
       "course_name": "Lakeside Golf Course"
     },
@@ -81,8 +80,5 @@
       "url": "https://quailchase.com/tee-times/"
     }
   ],
-  "diagnostic_mode": true,
-  "diagnostic_dates": [
-    "2026-09-19"
-  ]
+  "diagnostic_mode": false
 }

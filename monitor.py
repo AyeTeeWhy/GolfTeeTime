@@ -68,7 +68,7 @@ def weekend_dates(today: date, lookahead_days: int) -> list[date]:
     out: list[date] = []
     d = today
     while d <= end:
-        if d.weekday() in (5, 6):
+        if d.weekday() == 6:  # Sunday only
             out.append(d)
         d += timedelta(days=1)
     return out
@@ -151,18 +151,15 @@ def record_scan_with_dates(con: sqlite3.Connection, result: ScanResult, scanned_
     return new_slots
 
 
-def send_ntfy(slots: list[Slot], topic: str) -> None:
+def send_ntfy(title: str, body: str, topic: str, url: str | None = None) -> None:
     import requests
-    if not slots:
-        return
-    lines = ["⛳ Tee time opened"]
-    for s in sorted(slots, key=lambda x: (x.tee_date, x.tee_time, x.course)):
-        lines.append(f"{s.course} — {s.tee_date} — {s.tee_time} — {s.players} golfers")
-        lines.append(s.url)
+    headers = {"Title": title, "Priority": "high", "Tags": "golf,calendar"}
+    if url:
+        headers["Click"] = url
     requests.post(
         f"https://ntfy.sh/{topic}",
-        data="\n".join(lines).encode("utf-8"),
-        headers={"Title": "Golf tee time alert", "Priority": "high", "Tags": "golf,calendar"},
+        data=body.encode("utf-8"),
+        headers=headers,
         timeout=20,
     ).raise_for_status()
 
@@ -245,17 +242,23 @@ def main() -> int:
 
     cfg = load_config()
     tz = ZoneInfo(cfg.get("timezone", "America/New_York"))
-    today = datetime.now(tz).date()
-    if cfg.get("diagnostic_dates"):
-        dates = [dtparser.parse(x).date() for x in cfg["diagnostic_dates"]]
-    else:
-        dates = weekend_dates(today, int(cfg.get("lookahead_days", 21)))
+    now_local = datetime.now(tz)
+    # GitHub cron runs hourly; only perform the real scan every 2 hours
+    # during the requested 6 AM-8 PM Eastern window. This keeps the schedule
+    # aligned across daylight-saving changes.
+    if not (6 <= now_local.hour <= 20 and now_local.hour % 2 == 0):
+        print(f"Outside scan window ({now_local.strftime('%Y-%m-%d %H:%M %Z')}); exiting.")
+        return 0
+
+    today = now_local.date()
+    dates = weekend_dates(today, int(cfg.get("lookahead_days", 7)))
     print(f"Scanning weekend dates: {', '.join(d.isoformat() for d in dates)}")
     print(f"Target: {cfg['players']} golfers, {cfg['start_time']}–{cfg['end_time']} {cfg.get('timezone','ET')}")
 
     db = init_db(BASE / cfg["state_db"])
     all_new: list[Slot] = []
     failures: list[str] = []
+    successful_results: dict[str, ScanResult] = {}
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not args.headed)
@@ -271,6 +274,9 @@ def main() -> int:
             else:
                 result = monitor_unsupported(course)
 
+            if result.ok:
+                successful_results[result.course] = result
+
             if not result.ok:
                 failures.append(f"{course['name']}: {result.error}")
                 print(f"ERROR {course['name']}: {result.error}")
@@ -284,17 +290,39 @@ def main() -> int:
 
         browser.close()
 
-    if all_new and cfg.get("diagnostic_mode", False):
-        print("DIAGNOSTIC MODE: alerts suppressed; matching slots were detected but no notification will be sent.")
-    elif all_new:
-        topic = os.environ.get("NTFY_TOPIC")
-        if topic:
-            send_ntfy(all_new, topic)
-        send_email(all_new)
-        for s in all_new:
-            print(f"ALERT: {s.course} {s.tee_date} {s.tee_time} ({s.players} golfers)")
-    else:
-        print("No newly opened matching tee times.")
+    topic = os.environ.get("NTFY_TOPIC")
+    if cfg.get("diagnostic_mode", False):
+        print("DIAGNOSTIC MODE: alerts suppressed.")
+    elif topic:
+        for course_name, result in successful_results.items():
+            course_cfg = next((c for c in cfg["courses"] if c.get("enabled") and c["name"] == course_name), None)
+            if course_cfg is None:
+                continue
+            if result.slots:
+                lines = [
+                    "Tee times are available",
+                    f"{course_name}",
+                    f"Sunday availability ({cfg['start_time']}-{cfg['end_time']})",
+                ]
+                for s in sorted(result.slots, key=lambda x: x.tee_time):
+                    lines.append(f"{s.tee_time} — {s.players}+ golfers")
+                lines.append("")
+                lines.append("4 golfers requested")
+                send_ntfy("Tee Time Available", "\n".join(lines), topic, course_cfg.get("url"))
+                for s in result.slots:
+                    print(f"ALERT: {s.course} {s.tee_date} {s.tee_time} ({s.players} golfers)")
+            else:
+                body = (
+                    f"{course_name}\n"
+                    f"Sunday availability ({cfg['start_time']}-{cfg['end_time']})\n"
+                    "No qualifying tee times found.\n"
+                    "4 golfers requested"
+                )
+                send_ntfy("No Tee Time", body, topic, course_cfg.get("url"))
+                print(f"STATUS: {course_name} has no qualifying tee times.")
+    elif successful_results:
+        print("NTFY_TOPIC is not configured; notifications skipped.")
+
 
     if failures:
         print("\nMONITOR FAILURES")
