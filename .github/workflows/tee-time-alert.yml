@@ -4,28 +4,30 @@ on:
   workflow_dispatch:
     inputs:
       force_scan:
-        description: "Run the monitor now even if outside the normal scan window"
+        description: "Run Wessinger scan now, regardless of time"
         required: false
         default: false
         type: boolean
+
   schedule:
-    # Run hourly; monitor.py performs real scans only at even hours from 6 AM-8 PM ET.
-    - cron: '0 * * * *'
+    # Run hourly so the monitor can select only the desired 2-hour
+    # Eastern-time scan windows itself.
+    - cron: "0 * * * *"
 
 jobs:
   check:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: "3.13"
 
       - name: Install dependencies
         run: |
@@ -33,44 +35,33 @@ jobs:
           pip install -r requirements.txt
           python -m playwright install --with-deps chromium
 
-      - name: Check tee times (forced manual run)
+      - name: Show run mode
+        env:
+          FORCE_SCAN: ${{ github.event_name == 'workflow_dispatch' && inputs.force_scan || false }}
+        run: |
+          echo "event_name=${{ github.event_name }}"
+          echo "force_scan=${FORCE_SCAN}"
+
+      - name: Check tee times - manual forced scan
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.force_scan == true }}
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
-        run: python monitor.py --force
+        run: |
+          echo "Running FORCED Wessinger scan"
+          python monitor.py --force
 
-      - name: Check tee times (scheduled/normal run)
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.force_scan != true }}
+      - name: Check tee times - manual normal scan
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.force_scan != true }}
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
-        run: python monitor.py
-
-      - name: Upload diagnostic files
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: golf-tee-time-debug
-          path: debug/
-          if-no-files-found: ignore
-
-      - name: Persist alert state
-        if: always()
         run: |
-          if git status --porcelain | grep -q 'state/availability.sqlite3'; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add state/availability.sqlite3
-            git commit -m "Update tee-time alert state" || true
-            git pull --rebase origin main || true
-            git push || true
-          fi
+          echo "Running manual Wessinger scan"
+          python monitor.py
+
+      - name: Check tee times - scheduled scan
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          echo "Running scheduled Wessinger scan"
+          python monitor.py
