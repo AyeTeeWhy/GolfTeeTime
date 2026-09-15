@@ -3,8 +3,8 @@ name: Golf Tee Time Alerts
 on:
   workflow_dispatch:
   schedule:
-    # GitHub Actions scheduled workflows run no more often than every 5 minutes.
-    - cron: '*/5 * * * *'
+    # Run hourly; monitor.py performs real scans only at even hours from 6 AM-8 PM ET.
+    - cron: '0 * * * *'
 
 jobs:
   check:
