@@ -10,10 +10,16 @@
   "state_db": "state/availability.sqlite3",
   "courses": [
     {
+      "name": "Lincoln Homestead",
+      "platform": "cps",
+      "enabled": true,
+      "url": "https://lincolnhomestead.cps.golf/onlineresweb/search-teetime"
+    },
+    {
       "name": "My Old Kentucky Home",
-      "platform": "unknown",
-      "enabled": false,
-      "url": ""
+      "platform": "cps",
+      "enabled": true,
+      "url": "https://myoldkentuckyhome.cps.golf/onlineresweb/search-teetime"
     },
     {
       "name": "Weissinger Hills",

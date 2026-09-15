@@ -1,1 +1,1 @@
-"""Booking-platform adapters for the golf tee-time monitor."""
+# Golf tee-time adapters.

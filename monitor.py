@@ -15,6 +15,7 @@ from playwright.sync_api import sync_playwright
 
 from adapters.teequest import scan as teequest_scan
 from adapters.webtrac import scan as webtrac_scan
+from adapters.cps import scan as cps_scan
 
 BASE = Path(__file__).resolve().parent
 TZ = ZoneInfo("America/New_York")
@@ -217,6 +218,21 @@ def monitor_webtrac(page, course: dict, dates: list[date], cfg: dict) -> ScanRes
         return ScanResult(course["name"], [], False, str(exc))
 
 
+def monitor_cps(page, course: dict, dates: list[date], cfg: dict) -> ScanResult:
+    slots: list[Slot] = []
+    try:
+        for d in dates:
+            found = cps_scan(
+                page, course, d, cfg["start_time"], cfg["end_time"], int(cfg["players"]),
+                diagnostic_dir=(BASE / "debug" / "cps") if cfg.get("diagnostic_mode", False) else None,
+            )
+            for s in found:
+                slots.append(Slot(course["name"], s.tee_date, s.tee_time, s.players, s.url))
+        return ScanResult(course["name"], dedupe(slots), True)
+    except Exception as exc:
+        return ScanResult(course["name"], [], False, str(exc))
+
+
 def monitor_unsupported(course: dict) -> ScanResult:
     return ScanResult(course["name"], [], False, f"Adapter '{course['platform']}' is not activated yet.")
 
@@ -238,7 +254,6 @@ def save_debug(page, course: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--headed", action="store_true")
-    ap.add_argument("--force", action="store_true", help="Run now even outside the normal time window")
     args = ap.parse_args()
 
     cfg = load_config()
@@ -247,7 +262,7 @@ def main() -> int:
     # GitHub cron runs hourly; only perform the real scan every 2 hours
     # during the requested 6 AM-8 PM Eastern window. This keeps the schedule
     # aligned across daylight-saving changes.
-    if (not args.force) and not (6 <= now_local.hour <= 20 and now_local.hour % 2 == 0):
+    if not (6 <= now_local.hour <= 20 and now_local.hour % 2 == 0):
         print(f"Outside scan window ({now_local.strftime('%Y-%m-%d %H:%M %Z')}); exiting.")
         return 0
 
@@ -272,6 +287,8 @@ def main() -> int:
                 result = monitor_teequest(page, course, dates, cfg)
             elif platform == "webtrac":
                 result = monitor_webtrac(page, course, dates, cfg)
+            elif platform == "cps":
+                result = monitor_cps(page, course, dates, cfg)
             else:
                 result = monitor_unsupported(course)
 
@@ -281,7 +298,7 @@ def main() -> int:
             if not result.ok:
                 failures.append(f"{course['name']}: {result.error}")
                 print(f"ERROR {course['name']}: {result.error}")
-                if platform in ("teequest", "webtrac"):
+                if platform in ("teequest", "webtrac", "cps"):
                     save_debug(page, course["name"])
                 continue
 
