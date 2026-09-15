@@ -2,6 +2,12 @@ name: Golf Tee Time Alerts
 
 on:
   workflow_dispatch:
+    inputs:
+      force_scan:
+        description: "Run the monitor now even if outside the normal scan window"
+        required: false
+        default: false
+        type: boolean
   schedule:
     # Run hourly; monitor.py performs real scans only at even hours from 6 AM-8 PM ET.
     - cron: '0 * * * *'
@@ -35,7 +41,7 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
-        run: python monitor.py
+        run: python monitor.py ${{ inputs.force_scan && '--force' || '' }}
 
       - name: Upload diagnostic files
         if: always()
