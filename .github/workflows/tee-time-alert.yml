@@ -33,7 +33,8 @@ jobs:
           pip install -r requirements.txt
           python -m playwright install --with-deps chromium
 
-      - name: Check tee times
+      - name: Check tee times (forced manual run)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.force_scan == true }}
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
@@ -41,7 +42,18 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
-        run: python monitor.py ${{ inputs.force_scan && '--force' || '' }}
+        run: python monitor.py --force
+
+      - name: Check tee times (scheduled/normal run)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.force_scan != true }}
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+        run: python monitor.py
 
       - name: Upload diagnostic files
         if: always()
