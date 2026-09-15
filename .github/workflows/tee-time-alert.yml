@@ -4,25 +4,35 @@ on:
   workflow_dispatch:
     inputs:
       force_scan:
-        description: "Run Wessinger scan now, regardless of time"
+        description: "Run Wessinger Hills scan now, regardless of time"
         required: false
         default: false
         type: boolean
 
   schedule:
-    # Run hourly so the monitor can select only the desired 2-hour
-    # Eastern-time scan windows itself.
-    - cron: "0 * * * *"
+    # GitHub Actions cron is UTC. We schedule both EDT and EST versions of
+    # the desired 6 AM-8 PM Eastern scan hours. monitor.py still checks the
+    # actual America/New_York time, so only the correct offset's run performs
+    # a scan. This keeps the 8 real scans/day aligned through DST changes.
+    #
+    # EDT (UTC-4): 6,8,10,12,14,16,18,20 ET
+    - cron: "0 10,12,14,16,18,20,22 * * *"
+    - cron: "0 0 * * *"
+    # EST (UTC-5): 6,8,10,12,14,16,18,20 ET
+    - cron: "0 11,13,15,17,19,21,23 * * *"
+    - cron: "0 1 * * *"
+
+permissions:
+  contents: read
 
 jobs:
   check:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -46,22 +56,16 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.force_scan == true }}
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: |
-          echo "Running FORCED Wessinger scan"
-          python monitor.py --force
+        run: python monitor.py --force
 
       - name: Check tee times - manual normal scan
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.force_scan != true }}
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: |
-          echo "Running manual Wessinger scan"
-          python monitor.py
+        run: python monitor.py
 
       - name: Check tee times - scheduled scan
         if: ${{ github.event_name == 'schedule' }}
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: |
-          echo "Running scheduled Wessinger scan"
-          python monitor.py
+        run: python monitor.py
